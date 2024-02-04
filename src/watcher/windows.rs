@@ -144,12 +144,13 @@ pub fn watch(dir: &str) {
 
 fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Sender<OsString>) {
     if let Some(first_x_bytes) = buffer.get(0..bytes_returned as usize) {
-        // Convert the byte slice to a string
+        // Convert the byte slice to a string → Need to be converted to FILE_NOTIFY_INFORMATION
+        // https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-file_notify_information 
         let utf8_string = String::from_utf8_lossy(first_x_bytes);
         println!("Converted string: {}", utf8_string);
-        let os_string = OsString::from(utf8_string.into_owned());
+        let os_string = OsString::from(utf8_string.into_owned());  // Remove
         
-        tx.send(os_string).unwrap();  // Right encoding ?
+        tx.send(os_string).unwrap();
     } else {
         eprintln!("Error: Could not convert buffer to string");
     }
