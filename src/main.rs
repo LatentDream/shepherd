@@ -1,5 +1,6 @@
+use core::panic;
 use std::{path::{Path, PathBuf}, thread::sleep, time};
-use watcher::win_watch;
+use watcher::windows;
 
 mod watcher;
 
@@ -34,11 +35,14 @@ fn main() {
 
     #[cfg(target_family = "windows")]
     {
-        win_watch(dir);
+        windows::watch(dir);
         // subscribe_to_change_windows(watch_dog);
     }
-    // TODO: Watchdog for Linux: https://www.man7.org/linux/man-pages/man7/inotify.7.html
-    // TODO: Fall back watchdog when limited, e.g. polling
+    #[cfg(target_family = "unix")]
+    {
+        unimplemented!()
+        // https://www.man7.org/linux/man-pages/man7/inotify.7.html
+    }
 
 }
 
@@ -52,14 +56,3 @@ struct WatcherDog {
     callback: Box<dyn Fn(&Path) -> ()>,
 }
 
-fn subscribe_to_change_windows(watch_dog: WatcherDog) -> ! {
-     
-    // TODO: Watchdog for Windows: https://learn.microsoft.com/en-us/windows/win32/fileio/obtaining-directory-change-notifications
-    // Win impl only for now | Todo
-    loop {
-        println!("Watching the sheep ... in {}", watch_dog.dir.display());
-        sleep(time::Duration::from_secs(5));
-        
-    }
-
-}

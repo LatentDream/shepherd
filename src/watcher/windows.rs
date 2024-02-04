@@ -61,7 +61,7 @@ extern "system" {
 }
 
 
-pub fn win_watch(dir: &str) {
+pub fn watch(dir: &str) {
     // Watch the current directory recursively
     let mut current_dir: Vec<u16> = vec![0; MAX_PATH];
 
