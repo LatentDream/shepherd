@@ -1,8 +1,11 @@
-use std::{path::Path, thread::sleep, time};
+use std::{path::{Path, PathBuf}, thread::sleep, time};
+use watcher::win_watch;
+
+mod watcher;
 
 fn main() {
-    println!("The stalker is finding the perfect bushes to hide in...");
-
+    
+    println!("The sherperd is here! 🐑");
     // Accept a directory as an argument
     // - Args: -d, --dir
     // - Default: current directory
@@ -20,24 +23,43 @@ fn main() {
     // - Default: false
 
     // TODO: cmd args parser
-    
-    // TODO: Watchdog for Windows: https://learn.microsoft.com/en-us/windows/win32/fileio/obtaining-directory-change-notifications
+    let args: Vec<String> = std::env::args().collect();
+    let dir = &args[1];  // ! Can panic!
+    // let sub = args[2].parse().unwrap();  // ! Can panic!
+    let watch_dog: WatcherDog = WatcherDog {
+        dir: PathBuf::from(dir),
+        sub: false,
+        callback: Box::new(display_change),
+    };
+
+    #[cfg(target_family = "windows")]
+    {
+        win_watch(dir);
+        // subscribe_to_change_windows(watch_dog);
+    }
     // TODO: Watchdog for Linux: https://www.man7.org/linux/man-pages/man7/inotify.7.html
     // TODO: Fall back watchdog when limited, e.g. polling
+
 }
 
-pub struct WatcherDog<'a> {
-    pub dir: &'a Path,
-    pub sub: bool,
-    pub callback: Box<dyn Fn(Path) -> ()>,
+fn display_change(path: &Path) -> () {
+    println!("Wild sheep detected! → {:?}", path)
 }
 
-fn watch(watch_dog: WatcherDog) -> ! {
-    
+struct WatcherDog {
+    dir: PathBuf,
+    sub: bool,
+    callback: Box<dyn Fn(&Path) -> ()>,
+}
+
+fn subscribe_to_change_windows(watch_dog: WatcherDog) -> ! {
+     
+    // TODO: Watchdog for Windows: https://learn.microsoft.com/en-us/windows/win32/fileio/obtaining-directory-change-notifications
     // Win impl only for now | Todo
     loop {
-        println!("Watching the sheep...");
+        println!("Watching the sheep ... in {}", watch_dog.dir.display());
         sleep(time::Duration::from_secs(5));
+        
     }
 
 }
