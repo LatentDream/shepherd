@@ -35,7 +35,7 @@ fn main() {
 
     #[cfg(target_family = "windows")]
     {
-        windows::watch(dir);
+        windows::watch(dir, true);
     }
     #[cfg(target_family = "unix")]
     {

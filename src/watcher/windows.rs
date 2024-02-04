@@ -73,7 +73,7 @@ extern "system" {
 }
 
 
-pub fn watch(dir: &str) {
+pub fn watch(dir: &str, with_sub_tree: bool) {
 
     let mut current_dir: Vec<u16> = vec![0; MAX_PATH];
 
@@ -114,6 +114,7 @@ pub fn watch(dir: &str) {
 
     // Main loop to receive directory change notifications
     let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE as usize];  // Data buffer → If overflow, all notif are lost
+    let watch_subtree = if with_sub_tree {1} else {0};
     loop {
         let mut bytes_returned: u32 = 0;
         let result = unsafe {
@@ -121,7 +122,7 @@ pub fn watch(dir: &str) {
                 directory_handle,
                 buffer.as_mut_ptr() as *mut std::ffi::c_void,
                 BUFFER_SIZE,
-                1, // Recursive → Add as optional 
+                watch_subtree ,
                 FILE_NOTIFY_CHANGE_LAST_WRITE 
                     | FILE_NOTIFY_CHANGE_CREATION 
                     | FILE_NOTIFY_CHANGE_FILE_NAME,
