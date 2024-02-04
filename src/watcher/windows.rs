@@ -1,3 +1,4 @@
+use std::fmt::write;
 use std::path::PathBuf;
 use std::{ptr, u16, u32};
 use std::ffi::OsString;
@@ -156,25 +157,35 @@ use std::mem;
 impl FILE_NOTIFY_INFORMATION {
     
     unsafe fn from_buffer(buffer: &[u8]) -> &FILE_NOTIFY_INFORMATION {
-        
-        let cur_offset: *const u8 = buffer.as_ptr();
-        let cur_entry: *const FILE_NOTIFY_INFORMATION = mem::transmute(cur_offset);
-        // filename length is size in bytes, so / 2
-        let len = (*cur_entry).file_name_length as usize / 2;
-        let encoded_path: &[u16] = slice::from_raw_parts((*cur_entry).file_name.as_ptr(), len);
-        // prepend root to get a full path
-        let path = OsString::from_wide(encoded_path);
-        let change = match (*cur_entry).action {
-            FILE_ACTION_ADDED => "added",
-            FILE_ACTION_MODIFIED => "modified",
-            FILE_ACTION_REMOVED => "removed",
-            FILE_ACTION_RENAMED_NEW_NAME => "renamed new name",
-            FILE_ACTION_RENAMED_OLD_NAME => "renamed old name",
-            _ => "unknown",
-        };
-        println!("  | {}: {:?}", change, path);
 
-        return &*cur_entry;
+        // let mut notifs = Vec::new();
+        
+        let mut current_offset: *const u8 = buffer.as_ptr();
+        let mut notif_ptr: *const FILE_NOTIFY_INFORMATION = mem::transmute(current_offset);
+
+        loop {
+            // filename length is size in bytes, so / 2
+            let len = (*notif_ptr).file_name_length as usize / 2;
+            let encoded_path: &[u16] = slice::from_raw_parts((*notif_ptr).file_name.as_ptr(), len);
+            // prepend root to get a full path
+            let path = OsString::from_wide(encoded_path);
+            let change = match (*notif_ptr).action {
+                FILE_ACTION_ADDED => "added",
+                FILE_ACTION_MODIFIED => "modified",
+                FILE_ACTION_REMOVED => "removed",
+                FILE_ACTION_RENAMED_NEW_NAME => "renamed new name",
+                FILE_ACTION_RENAMED_OLD_NAME => "renamed old name",
+                _ => "unknown",
+            };
+            println!("  | {}: {:?}", change, path);
+            // notifs.push((*notif_ptr));
+            if (*notif_ptr).next_entry_offset == 0 {
+                break;
+            }
+            current_offset = current_offset.offset((*notif_ptr).next_entry_offset as isize);
+            notif_ptr = mem::transmute(current_offset);
+        }
+        return &*notif_ptr;
     }
 
 }
