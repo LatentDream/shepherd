@@ -6,6 +6,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use std::os::windows::ffi::OsStrExt;
 
+// Great blog post on the subject: https://qualapps.blogspot.com/2010/05/understanding-readdirectorychangesw_19.html
 
 const BUFFER_SIZE: u32 = 4096;
 const MAX_PATH: usize = 260; // Max path length in Windows
@@ -75,15 +76,15 @@ pub fn watch(dir: &str) {
 
     println!("Current working directory: {:?}", String::from_utf16_lossy(&current_dir));
     
-    // let directory = CString::new(current_dir_u8).expect("CString conversion failed");
     let directory_handle = unsafe {
+        // Warning: the handle change the dir state to "in use" so it can't be deleted
         CreateFileW(
             current_dir.as_ptr(),
             FILE_LIST_DIRECTORY,    // FILE_LIST_DIRECTORY
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             ptr::null_mut(),
             OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS ,
+            FILE_FLAG_BACKUP_SEMANTICS,
             ptr::null_mut(),
         )
     };
@@ -93,10 +94,7 @@ pub fn watch(dir: &str) {
         panic!("Failed to open directory");
     }
 
-    // For ReadDirectoryChangesW results | Nothing is written to this buffer right now, why ?
-    let mut buffer = Vec::with_capacity(BUFFER_SIZE as usize);
 
-    // To process the directory change notifications
     let (tx, rx): (std::sync::mpsc::Sender<OsString>, Receiver<OsString>) = channel();
     thread::spawn(move || {
         loop {
@@ -105,6 +103,7 @@ pub fn watch(dir: &str) {
     });
 
     // Main loop to receive directory change notifications
+    let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE as usize];  // Data buufer → Can overflow and data could be lost
     loop {
         let mut bytes_returned: u32 = 0;
         let result = unsafe {
@@ -122,16 +121,18 @@ pub fn watch(dir: &str) {
             )
         };
 
-        println!("A sheep is on the run {}", result);
-        println!("  | Buffer → {:?}", buffer);
-        println!("  | Bytes returned → {}", bytes_returned);
 
         if result == 0 {
             let error_code = unsafe { GetLastError() };
             panic!("ReadDirectoryChangesW failed {}", error_code);
         }
 
-        process_buffer(&buffer, &tx);
+        println!("A sheep is on the run {}", result);
+        println!("  | Bytes returned → {}", bytes_returned);
+
+        // Convert the byte slice to a string
+        process_buffer(&buffer.clone(), bytes_returned, &tx);
+
     }
 
     // Todo: graceful shutdown
@@ -141,24 +142,24 @@ pub fn watch(dir: &str) {
     }
 }
 
-fn process_buffer(buffer: &[u8], tx: &std::sync::mpsc::Sender<OsString>) {
-    let mut offset: usize = 0;
-
-    while offset < buffer.len() {
-        let info = unsafe { &*(buffer.as_ptr().add(offset) as *const FILE_NOTIFY_INFORMATION) };
-        let file_name = OsString::from_wide(&info.file_name[0..info.file_name_length as usize]);
-        tx.send(file_name).unwrap();
-
-        offset += info.next_entry_offset as usize;
-
-        if info.next_entry_offset == 0 {
-            break;
-        }
+fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Sender<OsString>) {
+    if let Some(first_x_bytes) = buffer.get(0..bytes_returned as usize) {
+        // Convert the byte slice to a string
+        let utf8_string = String::from_utf8_lossy(first_x_bytes);
+        println!("Converted string: {}", utf8_string);
+        let os_string = OsString::from(utf8_string.into_owned());
+        
+        tx.send(os_string).unwrap();  // Right encoding ?
+    } else {
+        eprintln!("Error: Could not convert buffer to string");
     }
+
 }
+
 
 fn process_events(rx: &std::sync::mpsc::Receiver<OsString>) {
     while let Ok(event) = rx.recv() {
+        // should process each file after a timeout period has passed with no further updates
         println!("File or directory changed: {:?}", event);
     }
 }
