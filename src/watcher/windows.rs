@@ -21,13 +21,6 @@ const FILE_NOTIFY_CHANGE_CREATION: u32  = 0x00000040;
 const FILE_NOTIFY_CHANGE_FILE_NAME: u32 = 0x00000001;
 
 
-#[repr(C)]
-struct FILE_NOTIFY_INFORMATION {
-    next_entry_offset: u32,
-    action: u32,
-    file_name_length: u32,
-    file_name: [u16; 1],
-}
 
 extern "system" {
     fn ReadDirectoryChangesW(
@@ -103,7 +96,7 @@ pub fn watch(dir: &str) {
     });
 
     // Main loop to receive directory change notifications
-    let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE as usize];  // Data buufer → Can overflow and data could be lost
+    let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE as usize];  // Data buffer → If overflow, all notif are lost
     loop {
         let mut bytes_returned: u32 = 0;
         let result = unsafe {
@@ -142,17 +135,71 @@ pub fn watch(dir: &str) {
     }
 }
 
-fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Sender<OsString>) {
-    if let Some(first_x_bytes) = buffer.get(0..bytes_returned as usize) {
-        // Convert the byte slice to a string
-        let utf8_string = String::from_utf8_lossy(first_x_bytes);
-        println!("Converted string: {}", utf8_string);
-        let os_string = OsString::from(utf8_string.into_owned());
+pub type FILE_ACTION = u32;
+pub const FILE_ACTION_ADDED: FILE_ACTION = 1u32;
+pub const FILE_ACTION_MODIFIED: FILE_ACTION = 3u32;
+pub const FILE_ACTION_REMOVED: FILE_ACTION = 2u32;
+pub const FILE_ACTION_RENAMED_NEW_NAME: FILE_ACTION = 5u32;
+pub const FILE_ACTION_RENAMED_OLD_NAME: FILE_ACTION = 4u32;
+
+
+#[repr(C)]
+pub struct FILE_NOTIFY_INFORMATION {
+    pub next_entry_offset: u32,
+    pub action: FILE_ACTION,
+    pub file_name_length: u32,
+    pub file_name: [u16; 1],
+}
+use std::slice;
+use std::mem;
+
+impl FILE_NOTIFY_INFORMATION {
+    
+    unsafe fn from_buffer(buffer: &[u8]) -> &FILE_NOTIFY_INFORMATION {
         
-        tx.send(os_string).unwrap();  // Right encoding ?
-    } else {
-        eprintln!("Error: Could not convert buffer to string");
+        let cur_offset: *const u8 = buffer.as_ptr();
+        let cur_entry: *const FILE_NOTIFY_INFORMATION = mem::transmute(cur_offset);
+        // filename length is size in bytes, so / 2
+        let len = (*cur_entry).file_name_length as usize / 2;
+        let encoded_path: &[u16] = slice::from_raw_parts((*cur_entry).file_name.as_ptr(), len);
+        // prepend root to get a full path
+        let path = OsString::from_wide(encoded_path);
+        let change = match (*cur_entry).action {
+            FILE_ACTION_ADDED => "added",
+            FILE_ACTION_MODIFIED => "modified",
+            FILE_ACTION_REMOVED => "removed",
+            FILE_ACTION_RENAMED_NEW_NAME => "renamed new name",
+            FILE_ACTION_RENAMED_OLD_NAME => "renamed old name",
+            _ => "unknown",
+        };
+        println!("  | {}: {:?}", change, path);
+
+        return &*cur_entry;
     }
+}
+
+
+fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Sender<OsString>) {
+    if bytes_returned == 0 {
+        return;
+    }
+
+    let notif = unsafe { FILE_NOTIFY_INFORMATION::from_buffer(buffer) };
+    // Convert the u16 array into a valid OsString
+    // let file_name_u16: Vec<u16> = notif.FileName.iter().take(notif.file_name_length as usize / 2).copied().collect();
+    // let os_string = OsString::from_wide(&file_name_u16);
+
+    // println!("    | file: {:?}", os_string);
+    // if let Some(first_x_bytes) = buffer.get(0..bytes_returned as usize) {
+    //     // Convert the byte slice to a string
+    //     let utf8_string = String::from_utf8_lossy(first_x_bytes);
+    //     println!("Converted string: {}", utf8_string);
+    //     let os_string = OsString::from(utf8_string.into_owned());
+    //     
+    //     tx.send(os_string).unwrap();  // Right encoding ?
+    // } else {
+    //     eprintln!("Error: Could not convert buffer to string");
+    // }
 
 }
 
