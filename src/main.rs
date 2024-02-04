@@ -1,4 +1,8 @@
-use std::{path::{Path, PathBuf}, process::ExitCode, env};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 use watcher::windows;
 
 mod watcher;
@@ -32,7 +36,11 @@ fn usage(program: &str) {
     eprintln!("Usage: {program} <command>");
     eprintln!("\nCommands:");
     for cmd in COMMANDS.iter() {
-        eprintln!("    {name} - {description}", name = cmd.name, description = cmd.description);
+        eprintln!(
+            "    {name} - {description}",
+            name = cmd.name,
+            description = cmd.description
+        );
     }
 }
 
@@ -58,7 +66,7 @@ fn watch_extract_params(_args: env::Args) {
     // Options: Ignore directories
     // - Args: -D, --dir
     // - Default: false
-    // → Insert option in WatchDog to pass it to the watcher 
+    // → Insert option in WatchDog to pass it to the watcher
     unimplemented!()
 }
 
@@ -66,11 +74,15 @@ fn dummy_fn(path: &Path) {
     println!("{:?}", path);
 }
 
-
 fn watch(_program: &str, args: env::Args) -> ExitCode {
     let mut args = args;
     let dir = args.next().expect("directory or file");
-    let sub: bool = match args.next().unwrap_or_else(|| "false".to_string()).to_lowercase().as_str() {
+    let sub: bool = match args
+        .next()
+        .unwrap_or_else(|| "false".to_string())
+        .to_lowercase()
+        .as_str()
+    {
         "true" => true,
         "false" => false,
         "0" => false,
@@ -100,9 +112,8 @@ fn watch(_program: &str, args: env::Args) -> ExitCode {
 }
 
 fn main() -> ExitCode {
-
     let mut args = env::args();
-    
+
     let program_name = args.next().expect("🐑");
     if let Some(command_name) = args.next() {
         // Process cmd
@@ -113,13 +124,11 @@ fn main() -> ExitCode {
             eprintln!("ERROR: command {command_name} is unknown");
             return ExitCode::FAILURE;
         }
-
     } else {
         // Show usage
         eprintln!("[ERROR] No command is provided");
         usage(&program_name);
         return ExitCode::FAILURE;
-
     }
     ExitCode::SUCCESS
 }

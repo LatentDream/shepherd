@@ -1,13 +1,13 @@
-use std::fmt;
-use std::path::PathBuf;
-use std::{ptr, u16, u32};
 use std::ffi::OsString;
+use std::fmt;
+use std::mem;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::ffi::OsStringExt;
+use std::path::PathBuf;
+use std::slice;
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
-use std::os::windows::ffi::OsStrExt;
-use std::slice;
-use std::mem;
+use std::{ptr, u16, u32};
 
 // Great blog post on the subject: https://qualapps.blogspot.com/2010/05/understanding-readdirectorychangesw_19.html
 
@@ -18,9 +18,9 @@ const FILE_SHARE_WRITE: u32 = 0x00000002;
 const FILE_SHARE_DELETE: u32 = 0x00000004;
 const OPEN_EXISTING: u32 = 3;
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
-const FILE_LIST_DIRECTORY: u32  = 0x0001;
+const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_NOTIFY_CHANGE_LAST_WRITE: u32 = 0x00000010;
-const FILE_NOTIFY_CHANGE_CREATION: u32  = 0x00000040;
+const FILE_NOTIFY_CHANGE_CREATION: u32 = 0x00000040;
 const FILE_NOTIFY_CHANGE_FILE_NAME: u32 = 0x00000001;
 type FILE_ACTION = u32;
 const FILE_ACTION_ADDED: FILE_ACTION = 1u32;
@@ -29,7 +29,6 @@ const FILE_ACTION_REMOVED: FILE_ACTION = 2u32;
 const FILE_ACTION_RENAMED_NEW_NAME: FILE_ACTION = 5u32;
 const FILE_ACTION_RENAMED_OLD_NAME: FILE_ACTION = 4u32;
 
-
 #[repr(C)]
 pub struct FILE_NOTIFY_INFORMATION {
     pub next_entry_offset: u32,
@@ -37,7 +36,6 @@ pub struct FILE_NOTIFY_INFORMATION {
     pub file_name_length: u32,
     pub file_name: [u16; 1],
 }
-
 
 extern "system" {
     fn ReadDirectoryChangesW(
@@ -66,31 +64,27 @@ extern "system" {
     fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
 }
 
-
 #[link(name = "kernel32")]
 extern "system" {
     fn GetModuleFileNameW(hModule: *mut std::ffi::c_void, lpFilename: *mut u16, nSize: u32) -> u32;
 }
 
-
-pub fn watch(dir: &str, with_sub_tree: bool) {
-
+pub fn watch(dir: &str, with_sub_tree: bool) -> ! {
     let mut current_dir: Vec<u16> = vec![0; MAX_PATH];
 
     let path_buf = PathBuf::from(dir);
-    current_dir = path_buf
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
+    current_dir = path_buf.as_os_str().encode_wide().chain(Some(0)).collect();
 
-    println!("Current working directory: {:?}", String::from_utf16_lossy(&current_dir));
-    
+    println!(
+        "Current working directory: {:?}",
+        String::from_utf16_lossy(&current_dir)
+    );
+
     let directory_handle = unsafe {
         // Warning: the handle change the dir state to "in use" so it can't be deleted
         CreateFileW(
             current_dir.as_ptr(),
-            FILE_LIST_DIRECTORY,    // FILE_LIST_DIRECTORY
+            FILE_LIST_DIRECTORY, // FILE_LIST_DIRECTORY
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             ptr::null_mut(),
             OPEN_EXISTING,
@@ -104,17 +98,17 @@ pub fn watch(dir: &str, with_sub_tree: bool) {
         panic!("Failed to open directory");
     }
 
-
-    let (tx, rx): (std::sync::mpsc::Sender<FileNotifyInfo>, Receiver<FileNotifyInfo>) = channel();
-    thread::spawn(move || {
-        loop {
-            process_events(&rx);
-        }
+    let (tx, rx): (
+        std::sync::mpsc::Sender<FileNotifyInfo>,
+        Receiver<FileNotifyInfo>,
+    ) = channel();
+    thread::spawn(move || loop {
+        process_events(&rx);
     });
 
     // Main loop to receive directory change notifications
-    let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE as usize];  // Data buffer → If overflow, all notif are lost
-    let watch_subtree = if with_sub_tree {1} else {0};
+    let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE as usize]; // Data buffer → If overflow, all notif are lost
+    let watch_subtree = if with_sub_tree { 1 } else { 0 };
     loop {
         let mut bytes_returned: u32 = 0;
         let result = unsafe {
@@ -122,16 +116,15 @@ pub fn watch(dir: &str, with_sub_tree: bool) {
                 directory_handle,
                 buffer.as_mut_ptr() as *mut std::ffi::c_void,
                 BUFFER_SIZE,
-                watch_subtree ,
-                FILE_NOTIFY_CHANGE_LAST_WRITE 
-                    | FILE_NOTIFY_CHANGE_CREATION 
+                watch_subtree,
+                FILE_NOTIFY_CHANGE_LAST_WRITE
+                    | FILE_NOTIFY_CHANGE_CREATION
                     | FILE_NOTIFY_CHANGE_FILE_NAME,
                 &mut bytes_returned,
                 ptr::null_mut(),
                 ptr::null_mut(),
             )
         };
-
 
         if result == 0 {
             let error_code = unsafe { GetLastError() };
@@ -140,22 +133,19 @@ pub fn watch(dir: &str, with_sub_tree: bool) {
 
         // Convert the byte slice to a string
         process_buffer(&buffer.clone(), bytes_returned, &tx);
-
     }
 
     // Todo: graceful shutdown
     #[warn(unreachable_code)]
     unsafe {
         CloseHandle(directory_handle);
-    }
+    };
 }
-
 
 pub struct FileNotifyInfo {
     pub action: FILE_ACTION,
     pub file_name: OsString,
 }
-
 
 impl fmt::Display for FileNotifyInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -168,16 +158,19 @@ impl fmt::Display for FileNotifyInfo {
             _ => "unknown",
         };
 
-        write!(f, "Action: {}, File Name: {}", change, self.file_name.to_string_lossy())
+        write!(
+            f,
+            "Action: {}, File Name: {}",
+            change,
+            self.file_name.to_string_lossy()
+        )
     }
 }
 
 impl FileNotifyInfo {
-    
     unsafe fn from_buffer(buffer: &[u8]) -> Vec<FileNotifyInfo> {
-
         let mut notifs = Vec::new();
-        
+
         let mut current_offset: *const u8 = buffer.as_ptr();
         let mut notif_ptr: *const FILE_NOTIFY_INFORMATION = mem::transmute(current_offset);
         loop {
@@ -199,11 +192,13 @@ impl FileNotifyInfo {
 
         return notifs;
     }
-
 }
 
-
-fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Sender<FileNotifyInfo>) {
+fn process_buffer(
+    buffer: &[u8],
+    bytes_returned: u32,
+    tx: &std::sync::mpsc::Sender<FileNotifyInfo>,
+) {
     if bytes_returned == 0 {
         return;
     }
@@ -212,9 +207,7 @@ fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Send
     for notif in notifs {
         let _ = tx.send(notif);
     }
-
 }
-
 
 fn process_events(rx: &std::sync::mpsc::Receiver<FileNotifyInfo>) {
     while let Ok(event) = rx.recv() {
