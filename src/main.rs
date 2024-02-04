@@ -6,7 +6,7 @@ mod watcher;
 
 fn main() {
     
-    println!("The sherperd is here! 🐑");
+    println!("The sherperd is starting his day! 🐑🐑🐑");
     // Accept a directory as an argument
     // - Args: -d, --dir
     // - Default: current directory
@@ -36,12 +36,12 @@ fn main() {
     #[cfg(target_family = "windows")]
     {
         windows::watch(dir);
-        // subscribe_to_change_windows(watch_dog);
     }
     #[cfg(target_family = "unix")]
     {
         unimplemented!()
         // https://www.man7.org/linux/man-pages/man7/inotify.7.html
+        // Will need to check for macOS
     }
 
 }

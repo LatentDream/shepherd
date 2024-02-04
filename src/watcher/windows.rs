@@ -19,6 +19,7 @@ const FILE_NOTIFY_CHANGE_LAST_WRITE: u32 = 0x00000010;
 const FILE_NOTIFY_CHANGE_CREATION: u32  = 0x00000040;
 const FILE_NOTIFY_CHANGE_FILE_NAME: u32 = 0x00000001;
 
+
 #[repr(C)]
 struct FILE_NOTIFY_INFORMATION {
     next_entry_offset: u32,
@@ -62,11 +63,10 @@ extern "system" {
 
 
 pub fn watch(dir: &str) {
-    // Watch the current directory recursively
+
     let mut current_dir: Vec<u16> = vec![0; MAX_PATH];
 
-    let input_str = "C:\\Users\\zzzgu\\Documents\\repo\\shepherd\\data";
-    let path_buf = PathBuf::from(input_str);
+    let path_buf = PathBuf::from(dir);
     current_dir = path_buf
         .as_os_str()
         .encode_wide()
@@ -93,7 +93,7 @@ pub fn watch(dir: &str) {
         panic!("Failed to open directory");
     }
 
-    // For ReadDirectoryChangesW results
+    // For ReadDirectoryChangesW results | Nothing is written to this buffer right now, why ?
     let mut buffer = Vec::with_capacity(BUFFER_SIZE as usize);
 
     // To process the directory change notifications
@@ -107,19 +107,24 @@ pub fn watch(dir: &str) {
     // Main loop to receive directory change notifications
     loop {
         let mut bytes_returned: u32 = 0;
-        println!("Listening to changes");
         let result = unsafe {
             ReadDirectoryChangesW(
                 directory_handle,
                 buffer.as_mut_ptr() as *mut std::ffi::c_void,
                 BUFFER_SIZE,
-                1, // Recursive
-                FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION | FILE_NOTIFY_CHANGE_FILE_NAME,
+                1, // Recursive → Add as optional 
+                FILE_NOTIFY_CHANGE_LAST_WRITE 
+                    | FILE_NOTIFY_CHANGE_CREATION 
+                    | FILE_NOTIFY_CHANGE_FILE_NAME,
                 &mut bytes_returned,
                 ptr::null_mut(),
                 ptr::null_mut(),
             )
         };
+
+        println!("A sheep is on the run {}", result);
+        println!("  | Buffer → {:?}", buffer);
+        println!("  | Bytes returned → {}", bytes_returned);
 
         if result == 0 {
             let error_code = unsafe { GetLastError() };
