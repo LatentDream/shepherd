@@ -176,6 +176,7 @@ impl FILE_NOTIFY_INFORMATION {
 
         return &*cur_entry;
     }
+
 }
 
 
