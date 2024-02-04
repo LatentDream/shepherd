@@ -138,9 +138,6 @@ pub fn watch(dir: &str, with_sub_tree: bool) {
             panic!("ReadDirectoryChangesW failed {}", error_code);
         }
 
-        println!("A sheep is on the run {}", result);
-        println!("  | Bytes returned → {}", bytes_returned);
-
         // Convert the byte slice to a string
         process_buffer(&buffer.clone(), bytes_returned, &tx);
 
