@@ -1,4 +1,4 @@
-use std::fmt::write;
+use std::fmt;
 use std::path::PathBuf;
 use std::{ptr, u16, u32};
 use std::ffi::OsString;
@@ -6,6 +6,8 @@ use std::os::windows::ffi::OsStringExt;
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use std::os::windows::ffi::OsStrExt;
+use std::slice;
+use std::mem;
 
 // Great blog post on the subject: https://qualapps.blogspot.com/2010/05/understanding-readdirectorychangesw_19.html
 
@@ -20,7 +22,21 @@ const FILE_LIST_DIRECTORY: u32  = 0x0001;
 const FILE_NOTIFY_CHANGE_LAST_WRITE: u32 = 0x00000010;
 const FILE_NOTIFY_CHANGE_CREATION: u32  = 0x00000040;
 const FILE_NOTIFY_CHANGE_FILE_NAME: u32 = 0x00000001;
+type FILE_ACTION = u32;
+const FILE_ACTION_ADDED: FILE_ACTION = 1u32;
+const FILE_ACTION_MODIFIED: FILE_ACTION = 3u32;
+const FILE_ACTION_REMOVED: FILE_ACTION = 2u32;
+const FILE_ACTION_RENAMED_NEW_NAME: FILE_ACTION = 5u32;
+const FILE_ACTION_RENAMED_OLD_NAME: FILE_ACTION = 4u32;
 
+
+#[repr(C)]
+pub struct FILE_NOTIFY_INFORMATION {
+    pub next_entry_offset: u32,
+    pub action: FILE_ACTION,
+    pub file_name_length: u32,
+    pub file_name: [u16; 1],
+}
 
 
 extern "system" {
@@ -89,7 +105,7 @@ pub fn watch(dir: &str) {
     }
 
 
-    let (tx, rx): (std::sync::mpsc::Sender<OsString>, Receiver<OsString>) = channel();
+    let (tx, rx): (std::sync::mpsc::Sender<FileNotifyInfo>, Receiver<FileNotifyInfo>) = channel();
     thread::spawn(move || {
         loop {
             process_events(&rx);
@@ -136,89 +152,75 @@ pub fn watch(dir: &str) {
     }
 }
 
-pub type FILE_ACTION = u32;
-pub const FILE_ACTION_ADDED: FILE_ACTION = 1u32;
-pub const FILE_ACTION_MODIFIED: FILE_ACTION = 3u32;
-pub const FILE_ACTION_REMOVED: FILE_ACTION = 2u32;
-pub const FILE_ACTION_RENAMED_NEW_NAME: FILE_ACTION = 5u32;
-pub const FILE_ACTION_RENAMED_OLD_NAME: FILE_ACTION = 4u32;
 
-
-#[repr(C)]
-pub struct FILE_NOTIFY_INFORMATION {
-    pub next_entry_offset: u32,
+pub struct FileNotifyInfo {
     pub action: FILE_ACTION,
-    pub file_name_length: u32,
-    pub file_name: [u16; 1],
+    pub file_name: OsString,
 }
-use std::slice;
-use std::mem;
 
-impl FILE_NOTIFY_INFORMATION {
+
+impl fmt::Display for FileNotifyInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let change = match self.action {
+            FILE_ACTION_ADDED => "added",
+            FILE_ACTION_MODIFIED => "modified",
+            FILE_ACTION_REMOVED => "removed",
+            FILE_ACTION_RENAMED_NEW_NAME => "renamed new name",
+            FILE_ACTION_RENAMED_OLD_NAME => "renamed old name",
+            _ => "unknown",
+        };
+
+        write!(f, "Action: {}, File Name: {}", change, self.file_name.to_string_lossy())
+    }
+}
+
+impl FileNotifyInfo {
     
-    unsafe fn from_buffer(buffer: &[u8]) -> &FILE_NOTIFY_INFORMATION {
+    unsafe fn from_buffer(buffer: &[u8]) -> Vec<FileNotifyInfo> {
 
-        // let mut notifs = Vec::new();
+        let mut notifs = Vec::new();
         
         let mut current_offset: *const u8 = buffer.as_ptr();
         let mut notif_ptr: *const FILE_NOTIFY_INFORMATION = mem::transmute(current_offset);
-
         loop {
             // filename length is size in bytes, so / 2
             let len = (*notif_ptr).file_name_length as usize / 2;
             let encoded_path: &[u16] = slice::from_raw_parts((*notif_ptr).file_name.as_ptr(), len);
-            // prepend root to get a full path
+            // Todo? prepend root to get a full path
             let path = OsString::from_wide(encoded_path);
-            let change = match (*notif_ptr).action {
-                FILE_ACTION_ADDED => "added",
-                FILE_ACTION_MODIFIED => "modified",
-                FILE_ACTION_REMOVED => "removed",
-                FILE_ACTION_RENAMED_NEW_NAME => "renamed new name",
-                FILE_ACTION_RENAMED_OLD_NAME => "renamed old name",
-                _ => "unknown",
-            };
-            println!("  | {}: {:?}", change, path);
-            // notifs.push((*notif_ptr));
+            notifs.push(FileNotifyInfo {
+                action: (*notif_ptr).action,
+                file_name: path,
+            });
             if (*notif_ptr).next_entry_offset == 0 {
                 break;
             }
             current_offset = current_offset.offset((*notif_ptr).next_entry_offset as isize);
             notif_ptr = mem::transmute(current_offset);
         }
-        return &*notif_ptr;
+
+        return notifs;
     }
 
 }
 
 
-fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Sender<OsString>) {
+fn process_buffer(buffer: &[u8], bytes_returned: u32, tx: &std::sync::mpsc::Sender<FileNotifyInfo>) {
     if bytes_returned == 0 {
         return;
     }
 
-    let notif = unsafe { FILE_NOTIFY_INFORMATION::from_buffer(buffer) };
-    // Convert the u16 array into a valid OsString
-    // let file_name_u16: Vec<u16> = notif.FileName.iter().take(notif.file_name_length as usize / 2).copied().collect();
-    // let os_string = OsString::from_wide(&file_name_u16);
-
-    // println!("    | file: {:?}", os_string);
-    // if let Some(first_x_bytes) = buffer.get(0..bytes_returned as usize) {
-    //     // Convert the byte slice to a string
-    //     let utf8_string = String::from_utf8_lossy(first_x_bytes);
-    //     println!("Converted string: {}", utf8_string);
-    //     let os_string = OsString::from(utf8_string.into_owned());
-    //     
-    //     tx.send(os_string).unwrap();  // Right encoding ?
-    // } else {
-    //     eprintln!("Error: Could not convert buffer to string");
-    // }
+    let notifs = unsafe { FileNotifyInfo::from_buffer(buffer) };
+    for notif in notifs {
+        let _ = tx.send(notif);
+    }
 
 }
 
 
-fn process_events(rx: &std::sync::mpsc::Receiver<OsString>) {
+fn process_events(rx: &std::sync::mpsc::Receiver<FileNotifyInfo>) {
     while let Ok(event) = rx.recv() {
         // should process each file after a timeout period has passed with no further updates
-        println!("File or directory changed: {:?}", event);
+        println!("{}", event);
     }
 }
