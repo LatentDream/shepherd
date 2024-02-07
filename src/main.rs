@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
-use watcher::windows;
+use watcher::{windows, WatchDog, FileChangeNotification};
 
 mod watcher;
 
@@ -44,42 +44,32 @@ fn usage(program: &str) {
     }
 }
 
-struct WatcherDog {
-    dir: PathBuf,
-    sub: bool,
-    callback: Box<dyn Fn(&Path)>,
-}
-
 fn watch_extract_params(_args: env::Args) {
     // Accept a directory as an argument
-    // - Args: -d, --dir
-    // - Default: current directory
     // Options: Watch subdirectorie
-    // - Args: -s, --sub
-    // - Default: false
     // Options: Ignore hidden files
-    // - Args: -i, --ignore
-    // - Default: false
-    // Options: Ignore files
-    // - Args: -f, --file
-    // - Default: false
-    // Options: Ignore directories
-    // - Args: -D, --dir
-    // - Default: false
+    // Options: Ignore files [file1, file2, ...]
+    // Options: Ignore directories [dir1, dir2, ...]
     // → Insert option in WatchDog to pass it to the watcher
     unimplemented!()
 }
 
-fn dummy_fn(path: &Path) {
-    println!("{:?}", path);
+fn print_change(change: &FileChangeNotification) {
+    println!("{}", change);
 }
 
 fn watch(_program: &str, args: env::Args) -> ExitCode {
     let mut args = args;
-    let dir = args.next().expect("directory or file");
+    let dir = args.next().unwrap_or_else(|| {
+        println!("No watch directory provided. Using current directory. To specefy a directory use: watch <dir> <is-watching-sub-tree>");
+        ".".to_string()
+    });
     let sub: bool = match args
         .next()
-        .unwrap_or_else(|| "false".to_string())
+        .unwrap_or_else(|| {
+            println!("No watch is-watching-sub-tree provided. Using false. To specefy a sub-tree use: watch <dir> <sub-tree>");
+            "false".to_string()
+        })
         .to_lowercase()
         .as_str()
     {
@@ -88,20 +78,20 @@ fn watch(_program: &str, args: env::Args) -> ExitCode {
         "0" => false,
         "1" => true,
         _ => {
-            eprintln!("Invalid value for watch sub-tree argument. Expected true or false");
+            eprintln!("Invalid value for watch is-watching-sub-tree argument. Expected true or false");
             return ExitCode::FAILURE;
         }
     };
 
-    let _watch_dog: WatcherDog = WatcherDog {
+    let watch_dog: WatchDog = WatchDog {
         dir: PathBuf::from(dir.clone()),
-        sub,
-        callback: Box::new(dummy_fn),
+        watch_sub_dir: sub,
+        callback: Box::new(print_change),
     };
 
     #[cfg(target_family = "windows")]
     {
-        windows::watch(&dir, true);
+        windows::watch(watch_dog);
     }
     #[cfg(target_family = "unix")]
     {
