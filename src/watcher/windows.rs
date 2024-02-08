@@ -8,8 +8,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use std::{ptr, u16, u32};
 
-// Great blog post on the subject: https://qualapps.blogspot.com/2010/05/understanding-readdirectorychangesw_19.html
-
+// Constants for Windows API calls
 const BUFFER_SIZE: u32 = 4096;
 const MAX_PATH: usize = 260; // Max path length in Windows
 const FILE_SHARE_READ: u32 = 0x00000001;
@@ -21,12 +20,19 @@ const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_NOTIFY_CHANGE_LAST_WRITE: u32 = 0x00000010;
 const FILE_NOTIFY_CHANGE_CREATION: u32 = 0x00000040;
 const FILE_NOTIFY_CHANGE_FILE_NAME: u32 = 0x00000001;
-type FILE_ACTION = u32;
 const FILE_ACTION_ADDED: FILE_ACTION = 1u32;
 const FILE_ACTION_MODIFIED: FILE_ACTION = 3u32;
 const FILE_ACTION_REMOVED: FILE_ACTION = 2u32;
 const FILE_ACTION_RENAMED_NEW_NAME: FILE_ACTION = 5u32;
 const FILE_ACTION_RENAMED_OLD_NAME: FILE_ACTION = 4u32;
+
+// Windows API types
+type PHANDLER_ROUTINE = Option<unsafe extern "system" fn(CtrlType: u32) -> BOOL>;
+type FILE_ACTION = u32;
+type BOOL = i32;
+
+// Store the handle to the directory so it can be closed when the program exits
+static mut HANDLE: Option<*mut std::ffi::c_void> = None;
 
 #[repr(C)]
 pub struct FILE_NOTIFY_INFORMATION {
@@ -36,7 +42,9 @@ pub struct FILE_NOTIFY_INFORMATION {
     pub file_name: [u16; 1],
 }
 
+// Windows API functions
 extern "system" {
+    // Great blog post on the subject: https://qualapps.blogspot.com/2010/05/understanding-readdirectorychangesw_19.html
     fn ReadDirectoryChangesW(
         directory: *mut std::ffi::c_void,
         buffer: *mut std::ffi::c_void,
@@ -61,11 +69,23 @@ extern "system" {
     pub fn GetLastError() -> u32;
 
     fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+
+    pub fn SetConsoleCtrlHandler(HandlerRoutine: PHANDLER_ROUTINE, Add: BOOL) -> BOOL;
 }
 
 #[link(name = "kernel32")]
 extern "system" {
     fn GetModuleFileNameW(hModule: *mut std::ffi::c_void, lpFilename: *mut u16, nSize: u32) -> u32;
+}
+
+// Graceful exit
+extern "system" fn ctrl_handler(_ctrl_type: u32) -> i32 {
+    if let Some(handle) = unsafe { HANDLE } {
+        unsafe {
+            CloseHandle(handle);
+        };
+    }
+    0 // False so the default handler will run
 }
 
 pub fn watch(watch_dog: WatchDog) -> ! {
@@ -83,7 +103,7 @@ pub fn watch(watch_dog: WatchDog) -> ! {
         // Warning: the handle change the dir state to "in use" so it can't be deleted
         CreateFileW(
             current_dir.as_ptr(),
-            FILE_LIST_DIRECTORY, // FILE_LIST_DIRECTORY
+            FILE_LIST_DIRECTORY,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             ptr::null_mut(),
             OPEN_EXISTING,
@@ -97,14 +117,18 @@ pub fn watch(watch_dog: WatchDog) -> ! {
         panic!("Failed to open directory");
     }
 
+    // Graceful exit
+    unsafe {
+        HANDLE = Some(directory_handle);
+        SetConsoleCtrlHandler(Some(ctrl_handler), 1);
+    }
+
     let (tx, rx): (
         std::sync::mpsc::Sender<FileChangeNotification>,
         Receiver<FileChangeNotification>,
     ) = channel();
 
-    thread::spawn(move || {
-        process_events(&rx, watch_dog.callback)
-    });
+    thread::spawn(move || process_events(&rx, watch_dog.callback));
 
     // Main loop to receive directory change notifications
     let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE as usize]; // Data buffer → If overflow, all notif are lost
@@ -131,17 +155,12 @@ pub fn watch(watch_dog: WatchDog) -> ! {
             panic!("ReadDirectoryChangesW failed {}", error_code);
         }
 
-        // Convert the byte slice to a string
+        // Convert the byte slice to a string and send it to the callback
         process_buffer(&buffer.clone(), bytes_returned, &tx);
     }
-
-    // Todo: graceful shutdown
-    #[warn(unreachable_code)]
-    unsafe {
-        CloseHandle(directory_handle);
-    };
 }
 
+// Process the buffer to extract the notifications
 impl FileChangeNotification {
     unsafe fn from_buffer(buffer: &[u8]) -> Vec<FileChangeNotification> {
         let mut notifs = Vec::new();
