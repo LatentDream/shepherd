@@ -1,9 +1,13 @@
 use std::{
     env,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::ExitCode,
 };
-use watcher::{windows, WatchDog, FileChangeNotification};
+use watcher::{ WatchDog, FileChangeNotification};
+#[cfg(target_family = "windows")]
+use watcher::windows;
+#[cfg(target_family = "unix")]
+use watcher::unix;
 
 mod watcher;
 
@@ -95,10 +99,9 @@ fn watch(_program: &str, args: env::Args) -> ExitCode {
     }
     #[cfg(target_family = "unix")]
     {
-        // https://www.man7.org/linux/man-pages/man7/inotify.7.html
-        unimplemented!();
+        unix::watch(watch_dog);
     }
-    ExitCode::SUCCESS
+    ExitCode::FAILURE
 }
 
 fn main() -> ExitCode {
