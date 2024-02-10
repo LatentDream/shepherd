@@ -1,8 +1,11 @@
 use super::WatchDog;
-use std::ffi::CString;
+use std::mem;
+use std::ffi::{CString, OsString};
 use std::io::Error;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::io::RawFd;
+use std::slice;
 
 pub fn watch(watch_dog: WatchDog) -> ! {
     // Watch a directory for changes using inotify
@@ -32,12 +35,13 @@ pub fn watch(watch_dog: WatchDog) -> ! {
     loop {
         let bytes_read = unsafe { read(fd, buffer.as_mut_ptr() as *mut c_void, BUFFER_LEN) };
         if bytes_read == -1 {
+            // Operation block until something happen
             // Potential problem resending the same path ?
             unsafe { inotify_add_watch(fd, path.as_ptr(), INOTIFY_FLAGS_IN_ALL_EVENTS); }
         }
         // TODO: Process events
         println!("Something happened!");
-
+        process_buffer(&buffer);
     }
 }
 
@@ -46,11 +50,11 @@ const BUFFER_LEN: usize = 1024;
 
 #[repr(C)]
 pub struct InotifyEvent {
-    pub wd: RawFd,
-    pub mask: c_uint,
-    pub cookie: c_uint,
-    pub len: c_uint,
-    pub name: [u8; 0], // c_char or c_uchar ?
+    pub wd: RawFd,      // Watch descr.
+    pub mask: c_uint,   // Descr. event
+    pub cookie: c_uint, // Unique cookie for rename event
+    pub len: c_uint,    // Name field
+    pub name: [u8; 0],  // c_char or c_uchar ?
 }
 
 // FFI
@@ -60,3 +64,18 @@ extern "C" {
     fn read(fd: c_int, buf: *mut c_void, count: usize) -> isize;
 }
 
+fn process_buffer(buffer: &[u8]) {
+
+    unsafe {
+        let notif_ptr: *const InotifyEvent = mem::transmute(buffer.as_ptr());
+        let wd = (*notif_ptr).wd;
+        let mask = (*notif_ptr).mask;
+        let cookie = (*notif_ptr).cookie;
+        let len = (*notif_ptr).len;
+        let encoded_path = slice::from_raw_parts((*notif_ptr).name.as_ptr(), len as usize);
+        let name_bytes: Vec<u8> = encoded_path.to_owned();
+        let path = OsString::from_vec(name_bytes);
+        println!("{} → {}", path.to_string_lossy(), mask);
+    }
+
+}
