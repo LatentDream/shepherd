@@ -1,5 +1,4 @@
 use crate::watcher::FileChange;
-
 use std::sync::mpsc::{channel, Receiver};
 use super::{WatchDog, FileChangeNotification};
 use core::panic;
@@ -33,7 +32,7 @@ pub fn watch(watch_dog: WatchDog) -> ! {
         panic!("Failed to create inotify instance: {:?}", error);
     }
 
-    let watch_descriptor = unsafe { inotify_add_watch(fd, path.as_ptr(), INOTIFY_FLAGS_IN_ALL_EVENTS) };
+    let watch_descriptor = unsafe { inotify_add_watch(fd, path.as_ptr(), MONITOR_FLAGS) };
     if watch_descriptor == -1 {
         let error = Error::last_os_error();
         panic!("Failed to create inotify instance: {:?}", error);
@@ -56,18 +55,20 @@ pub fn watch(watch_dog: WatchDog) -> ! {
         // Operation block until something happen
         let bytes_read = unsafe { read(fd, buffer.as_mut_ptr() as *mut c_void, BUFFER_LEN) };
         if bytes_read == -1 {
+            let error = Error::last_os_error();
+            println!("Failed to create inotify instance: {:?} - Trying to restart...", error);
             unsafe {
-                inotify_add_watch(fd, path.as_ptr(), INOTIFY_FLAGS_IN_ALL_EVENTS);
+                inotify_add_watch(fd, path.as_ptr(), MONITOR_FLAGS);
             }
+        } else {
+            process_buffer(&buffer, bytes_read, &tx);
         }
-        process_buffer(&buffer, bytes_read);
     }
 }
 
 // C bindings
 // __________________________________________________________
 
-const INOTIFY_FLAGS_IN_ALL_EVENTS: u32 = 0xFFF;
 const BUFFER_LEN: usize = 1024;
 const IN_ACCESS: u32 = 0x00000001;
 const IN_MODIFY: u32 = 0x00000002;
@@ -83,6 +84,8 @@ const IN_CREATE: u32 = 0x00000100;
 const IN_DELETE: u32 = 0x00000200;
 const IN_DELETE_SELF: u32 = 0x00000400;
 const IN_MOVE_SELF: u32 = 0x00000800;
+
+const MONITOR_FLAGS: u32 = IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVE | IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF ;
 
 
 #[repr(C)]
@@ -125,16 +128,20 @@ impl FileChangeNotification {
         let mut notifs = Vec::new();
         let mut current_offset: *const u8 = buffer.as_ptr();
         // Loop over all events in the buffer
+        let mut loop_count = 0;
         loop {
+ 
+            print!("Loop count: {}\n", loop_count);
+            loop_count += 1;
             let notif_ptr: *const InotifyEvent = current_offset as *const InotifyEvent;
             // Check if the pointer goes beyond the buffer length
             if current_offset.offset(mem::size_of::<InotifyEvent>() as isize) > buffer.as_ptr().offset(buffer_len) {
                 break;
             }
-            // Process the buffer
-            let wd = (*notif_ptr).wd;
+            let _wd = (*notif_ptr).wd;
+            // TODO: Need to use cookie to pair to event remane since they might not be located one after the other
             let mask = (*notif_ptr).mask;
-            let cookie = (*notif_ptr).cookie;
+            let _cookie = (*notif_ptr).cookie;
             let len = (*notif_ptr).len;
             let encoded_path = slice::from_raw_parts((*notif_ptr).name.as_ptr(), len as usize);
             let name_bytes: Vec<u8> = encoded_path.to_owned();
@@ -145,7 +152,6 @@ impl FileChangeNotification {
             } else if mask == IN_MOVE_SELF {
                 panic!("The watched directory has been moved");
             }
-            // Build the notif
             let notif = FileChangeNotification {
                 file: path,
                 action: match mask {
@@ -165,14 +171,26 @@ impl FileChangeNotification {
     }
 }
 
-fn process_buffer(buffer: &[u8], buffer_len: isize) {
-    unsafe {
-        let notifs = FileChangeNotification::from_buffer(buffer, buffer_len);
-        for notif in notifs {
-            println!("{}", notif);
-        }
+// fn process_buffer(buffer: &[u8], buffer_len: isize) {
+//     unsafe {
+//         let notifs = FileChangeNotification::from_buffer(buffer, buffer_len);
+//         for notif in notifs {
+//             println!("{}", notif);
+//         }
+//     }
+// }
+
+fn process_buffer(
+    buffer: &[u8],
+    buffer_len: isize,
+    tx: &std::sync::mpsc::Sender<FileChangeNotification>,
+) {
+    let notifs = unsafe { FileChangeNotification::from_buffer(buffer, buffer_len) };
+    for notif in notifs {
+        let _ = tx.send(notif);
     }
 }
+
 fn process_events(
     rx: &std::sync::mpsc::Receiver<FileChangeNotification>,
     callback: Box<dyn Fn(&FileChangeNotification)>,
