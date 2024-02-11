@@ -1,11 +1,14 @@
 use super::WatchDog;
 use std::ffi::{CString, OsString};
 use std::io::Error;
-use std::mem;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::io::RawFd;
+use std::process::exit;
 use std::slice;
+use std::{mem, usize};
+
+static mut FILE_DESCRIPTOR: Option<RawFd> = None;
 
 pub fn watch(watch_dog: WatchDog) -> ! {
     // Watch a directory for changes using inotify
@@ -20,22 +23,24 @@ pub fn watch(watch_dog: WatchDog) -> ! {
         panic!("Failed to create inotify instance: {:?}", error);
     }
 
-    let watch_descriptor =
-        unsafe { inotify_add_watch(fd, path.as_ptr(), INOTIFY_FLAGS_IN_ALL_EVENTS) };
+    // Better way of passing the file descriptor ??
+    unsafe { FILE_DESCRIPTOR = Some(fd); }
 
+    let watch_descriptor = unsafe { inotify_add_watch(fd, path.as_ptr(), INOTIFY_FLAGS_IN_ALL_EVENTS) };
     if watch_descriptor == -1 {
         let error = Error::last_os_error();
         panic!("Failed to create inotify instance: {:?}", error);
     }
 
-    let mut buffer = [0u8; BUFFER_LEN];
+    // Graceful exit
+    unsafe { signal(SIGINT, sigint_handler as usize); }
 
     // Read events
+    let mut buffer = [0u8; BUFFER_LEN];
     loop {
+        // Operation block until something happen
         let bytes_read = unsafe { read(fd, buffer.as_mut_ptr() as *mut c_void, BUFFER_LEN) };
         if bytes_read == -1 {
-            // Operation block until something happen
-            // Potential problem resending the same path ?
             unsafe {
                 inotify_add_watch(fd, path.as_ptr(), INOTIFY_FLAGS_IN_ALL_EVENTS);
             }
@@ -56,11 +61,27 @@ pub struct InotifyEvent {
     pub name: [u8; 0],  // c_char or c_uchar ?
 }
 
+pub type SighandlerT = usize;
+pub const SIGINT: c_int = 2;
+
 // FFI
 extern "C" {
-    fn inotify_init() -> c_int;
+    fn inotify_init() -> RawFd;
     fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: c_uint) -> c_int;
     fn read(fd: c_int, buf: *mut c_void, count: usize) -> isize;
+    fn close(fd: c_int) -> c_int;
+    pub fn signal(signum: c_int, handler: SighandlerT) -> SighandlerT;
+}
+
+// Graceful exit
+extern "C" fn sigint_handler(_: c_int) {
+    println!(" [INFO] Received Ctrl+C signal. Cleaning up...");
+    if let Some(fd) = unsafe { FILE_DESCRIPTOR } {
+        unsafe {
+            close(fd);
+        }
+    }
+    exit(0);
 }
 
 fn process_buffer(buffer: &[u8], buffer_len: isize) {
@@ -70,7 +91,9 @@ fn process_buffer(buffer: &[u8], buffer_len: isize) {
         loop {
             let notif_ptr: *const InotifyEvent = current_offset as *const InotifyEvent;
             // Check if the pointer goes beyond the buffer length
-            if current_offset.offset(mem::size_of::<InotifyEvent>() as isize) > buffer.as_ptr().offset(buffer_len) {
+            if current_offset.offset(mem::size_of::<InotifyEvent>() as isize)
+                > buffer.as_ptr().offset(buffer_len)
+            {
                 break;
             }
 
@@ -82,7 +105,8 @@ fn process_buffer(buffer: &[u8], buffer_len: isize) {
             let name_bytes: Vec<u8> = encoded_path.to_owned();
             let path = OsString::from_vec(name_bytes);
             println!("{} → {}", path.to_string_lossy(), mask);
-            current_offset = current_offset.offset(mem::size_of::<InotifyEvent>() as isize + len as isize);
+            current_offset =
+                current_offset.offset(mem::size_of::<InotifyEvent>() as isize + len as isize);
         }
     }
 }
