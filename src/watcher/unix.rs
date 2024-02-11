@@ -1,5 +1,6 @@
 use crate::watcher::FileChange;
 
+use std::sync::mpsc::{channel, Receiver};
 use super::{WatchDog, FileChangeNotification};
 use core::panic;
 use std::ffi::{CString, OsString};
@@ -10,6 +11,10 @@ use std::os::unix::io::RawFd;
 use std::process::exit;
 use std::slice;
 use std::{mem, usize};
+use std::thread;
+
+// Main logic
+// __________________________________________________________
 
 static mut FILE_DESCRIPTOR: Option<RawFd> = None;
 
@@ -38,6 +43,13 @@ pub fn watch(watch_dog: WatchDog) -> ! {
     unsafe { FILE_DESCRIPTOR = Some(fd); }
     unsafe { signal(SIGINT, sigint_handler as usize); }
 
+    let (tx, rx): (
+        std::sync::mpsc::Sender<FileChangeNotification>,
+        Receiver<FileChangeNotification>,
+    ) = channel();
+    thread::spawn(move || process_events(&rx, watch_dog.callback));
+
+
     // Read events
     let mut buffer = [0u8; BUFFER_LEN];
     loop {
@@ -51,6 +63,9 @@ pub fn watch(watch_dog: WatchDog) -> ! {
         process_buffer(&buffer, bytes_read);
     }
 }
+
+// C bindings
+// __________________________________________________________
 
 const INOTIFY_FLAGS_IN_ALL_EVENTS: u32 = 0xFFF;
 const BUFFER_LEN: usize = 1024;
@@ -102,7 +117,9 @@ extern "C" fn sigint_handler(_: c_int) {
     exit(0);
 }
 
-// Process the buffer to extract the notification
+// Buffer Processing 
+// __________________________________________________________
+
 impl FileChangeNotification {
     unsafe fn from_buffer(buffer: &[u8], buffer_len: isize) -> Vec<FileChangeNotification> {
         let mut notifs = Vec::new();
@@ -156,3 +173,13 @@ fn process_buffer(buffer: &[u8], buffer_len: isize) {
         }
     }
 }
+fn process_events(
+    rx: &std::sync::mpsc::Receiver<FileChangeNotification>,
+    callback: Box<dyn Fn(&FileChangeNotification)>,
+) {
+    while let Ok(event) = rx.recv() {
+        // should process each file after a timeout period has passed with no further updates
+        callback(&event);
+    }
+}
+
