@@ -21,6 +21,9 @@ pub fn watch(watch_dog: WatchDog) -> ! {
     // Watch a directory for changes using inotify
     //   -> https://www.man7.org/linux/man-pages/man7/inotify.7.html
     //   -> Or `man inotify`
+    if watch_dog.watch_sub_dir {
+        unimplemented!("Subdirectory watching is not implemented yet for unix")
+    }
 
     let path = watch_dog.dir.as_path().to_str().expect("No directory to watch was provided");
     println!("Watching directory: {}", path);
@@ -128,11 +131,7 @@ impl FileChangeNotification {
         let mut notifs = Vec::new();
         let mut current_offset: *const u8 = buffer.as_ptr();
         // Loop over all events in the buffer
-        let mut loop_count = 0;
         loop {
- 
-            print!("Loop count: {}\n", loop_count);
-            loop_count += 1;
             let notif_ptr: *const InotifyEvent = current_offset as *const InotifyEvent;
             // Check if the pointer goes beyond the buffer length
             if current_offset.offset(mem::size_of::<InotifyEvent>() as isize) > buffer.as_ptr().offset(buffer_len) {

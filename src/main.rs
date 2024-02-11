@@ -4,10 +4,6 @@ use std::{
     process::ExitCode,
 };
 use watcher::{ WatchDog, FileChangeNotification};
-#[cfg(target_family = "windows")]
-use watcher::windows;
-#[cfg(target_family = "unix")]
-use watcher::unix;
 
 mod watcher;
 
@@ -93,14 +89,8 @@ fn watch(_program: &str, args: env::Args) -> ExitCode {
         callback: Box::new(print_change),
     };
 
-    #[cfg(target_family = "windows")]
-    {
-        windows::watch(watch_dog);
-    }
-    #[cfg(target_family = "unix")]
-    {
-        unix::watch(watch_dog);
-    }
+    watcher::watch(watch_dog);
+
     ExitCode::FAILURE
 }
 

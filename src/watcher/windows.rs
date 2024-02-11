@@ -94,10 +94,6 @@ pub fn watch(watch_dog: WatchDog) -> ! {
     let path_buf = watch_dog.dir;
     current_dir = path_buf.as_os_str().encode_wide().chain(Some(0)).collect();
 
-    println!(
-        "Current working directory: {:?}",
-        String::from_utf16_lossy(&current_dir)
-    );
 
     let directory_handle = unsafe {
         // Warning: the handle change the dir state to "in use" so it can't be deleted
@@ -127,7 +123,6 @@ pub fn watch(watch_dog: WatchDog) -> ! {
         std::sync::mpsc::Sender<FileChangeNotification>,
         Receiver<FileChangeNotification>,
     ) = channel();
-
     thread::spawn(move || process_events(&rx, watch_dog.callback));
 
     // Main loop to receive directory change notifications
