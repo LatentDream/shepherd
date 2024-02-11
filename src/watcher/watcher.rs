@@ -9,12 +9,13 @@ pub struct WatchDog {
 }
 
 pub enum FileChange {
-    Added,
+    Created,
     Modified,
-    Removed,
+    Deleted,
     RenamedNewName,
     RenamedOldName,
     Unknow,
+    Other,
 }
 
 pub struct FileChangeNotification {
@@ -25,12 +26,13 @@ pub struct FileChangeNotification {
 impl fmt::Display for FileChangeNotification {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let change = match self.action {
-            FileChange::Added => "added",
+            FileChange::Created => "Created",
             FileChange::Modified => "modified",
-            FileChange::Removed => "removed",
+            FileChange::Deleted => "deleted",
             FileChange::RenamedNewName => "renamed new name",
             FileChange::RenamedOldName => "renamed old name",
-            _ => "unknown",
+            FileChange::Other => "other",
+            FileChange::Unknow => "unknown",
         };
         write!(
             f,

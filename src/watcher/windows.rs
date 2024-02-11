@@ -175,9 +175,9 @@ impl FileChangeNotification {
             let path = OsString::from_wide(encoded_path);
             notifs.push(FileChangeNotification {
                 action: match (*notif_ptr).action {
-                    FILE_ACTION_ADDED => FileChange::Added,
+                    FILE_ACTION_ADDED => FileChange::Created,
                     FILE_ACTION_MODIFIED => FileChange::Modified,
-                    FILE_ACTION_REMOVED => FileChange::Removed,
+                    FILE_ACTION_REMOVED => FileChange::Deleted,
                     FILE_ACTION_RENAMED_NEW_NAME => FileChange::RenamedNewName,
                     FILE_ACTION_RENAMED_OLD_NAME => FileChange::RenamedOldName,
                     _ => FileChange::Unknow,
